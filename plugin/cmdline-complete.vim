@@ -1,6 +1,6 @@
 " Script Name: cmdline-complete.vim
-" Version:     1.1.2
-" Last Change: July 13, 2008
+" Version:     1.1.3
+" Last Change: July 18, 2008
 " Author:      Yuheng Xie <xie_yuheng@yahoo.com.cn>
 "
 " Description: complete command-line (: / etc.) from the current file
@@ -68,12 +68,27 @@ try:
 	seed = vim.eval("a:seed")
 	backward = int(vim.eval("a:backward"))
 
-	regexp = re.compile(r'\b' + seed + r'\w+')
+	def chars2range(list):
+		range_text = ""
+		for i in range(len(list)):
+			if i > 0 and list[i - 1] == list[i] - 1 \
+					and i < len(list) - 1 and list[i + 1] == list[i] + 1:
+				if range_text[-1] != "-":
+					range_text += "-"
+			else:
+				range_text += '\\x%02X' % list[i]
+		return "[" + range_text + "]"
+
+	# simulate vim's \k
+	k = chars2range(map(lambda x: int(x), vim.eval( \
+			"filter(range(256), 'nr2char(v:val) =~ \"\\\\k\"')")))
+
+	regexp = re.compile(r'(?<!' + k + r')' + re.escape(seed) + k + r'+')
 	if not seed:
-		regexp = re.compile(r'\b\w\w+')
+		regexp = re.compile(r'(?<!' + k + r')' + k + k + r'+')
 	elif int(vim.eval("&ignorecase")) \
 			and not (int(vim.eval("&smartcase")) and re.search(r'[A-Z]', seed)):
-		regexp = re.compile(r'(?i)\b' + seed + r'\w+')
+		regexp = re.compile(r'(?i)(?<!' + k + r')' + re.escape(seed) + k + r'+')
 
 	buffer = vim.current.buffer
 	completions_set = vim.eval("s:completions_set")
@@ -154,19 +169,19 @@ endfunction
 
 " generate completion list
 function! s:GenerateCompletions(seed, backward)
-	let regexp = '\<' . a:seed . '\w\+'
+	let regexp = '\<' . a:seed . '\k\+'
 	if empty(a:seed)
-		let regexp = '\<\w\w\+'
-	elseif &ignorecase && !(&smartcase && a:seed =~ '\C[A-Z]')
+		let regexp = '\<\k\k\+'
+	elseif a:seed =~ '\K'
+		let regexp = '\<\(\V' . a:seed . '\)\k\+'
+	endif
+	if &ignorecase && !(&smartcase && a:seed =~ '\C[A-Z]')
 		let regexp = '\c' . regexp
 	endif
 
 	" backup 'ignorecase', do searching with 'noignorecase'
 	let save_ignorecase = &ignorecase
 	set noignorecase
-	" backup 'iskeyword', set it to [0-9A-Za-z_]
-	let save_iskeyword = &iskeyword
-	set iskeyword=48-57,A-Z,a-z,_
 
 	let r = []
 	if s:sought_bw < s:search_cursor[1]
@@ -200,7 +215,7 @@ function! s:GenerateCompletions(seed, backward)
 		let line = getline(r[0])
 		let start = match(line, regexp)
 		while start != -1
-			let candidate = matchstr(line, '\w\+', start)
+			let candidate = matchstr(line, '\k\+', start)
 			let next = start + len(candidate)
 			if r[0] != s:search_cursor[1]
 					\ || a:backward && (!s:sought_bw && start < s:search_cursor[2]
@@ -260,8 +275,6 @@ function! s:GenerateCompletions(seed, backward)
 
 	" restore 'ignorecase'
 	let &ignorecase = save_ignorecase
-	" restore 'iskeyword'
-	let &iskeyword = save_iskeyword
 
 	return 1
 endfunction
@@ -280,7 +293,7 @@ function! s:CmdlineComplete(backward)
 		let s:last_cmdline = cmdline
 		let s:last_pos = pos
 
-		let s = match(strpart(cmdline, 0, pos - 1), '\w*$')
+		let s = match(strpart(cmdline, 0, pos - 1), '\k*$')
 		let s:seed = strpart(cmdline, s, pos - 1 - s)
 		let s:completions = [s:seed]
 		let s:completions_set = {}
